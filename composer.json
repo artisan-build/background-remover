@@ -1,0 +1,30 @@
+{
+    "name": "artisan-build/background-remover",
+    "description": "Laravel wrapper for artisan-build/bg-remover",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Ed Grosvenor",
+            "email": "hello@artisan.build"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^11.0|^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "ArtisanBuild\\BackgroundRemover\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "ArtisanBuild\\BackgroundRemover\\Providers\\BackgroundRemoverServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
