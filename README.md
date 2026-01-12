@@ -2,16 +2,19 @@
 
 [![MIT Licensed](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
 
-A Laravel wrapper for the [artisan-build/bg-remover](https://github.com/artisan-build/bg-remover) C++ binary, providing fast and efficient background removal using OpenCV's GrabCut algorithm.
+A Laravel wrapper for the [artisan-build/bg-remover](https://github.com/artisan-build/bg-remover) C++ binary, providing fast and efficient background removal using OpenCV's GrabCut algorithm and optional ML-based segmentation.
 
 ## Features
 
 - 🚀 **Fast** - Native C++ performance using OpenCV
+- 🤖 **ML Support** - Optional ONNX Runtime for ML-based segmentation (U2-Net, RMBG)
 - 🎯 **Simple API** - Easy-to-use Laravel service class
 - ☁️ **Cloud Storage** - Built-in support for Laravel Storage (S3, local, etc.)
-- 📦 **Multi-platform** - Supports Alpine (Vapor), Ubuntu (Forge), and macOS ARM64
+- 📦 **Multi-platform** - Supports Ubuntu (Forge) and macOS ARM64
 - 🔒 **Checksum Verification** - Ensures binary integrity
 - ⚡ **Queue Support** - Async processing via Laravel queues
+- 🔧 **Build from Source** - Includes full C++ source code and build system
+- 🎨 **Demo UI** - Interactive web interface for testing
 
 ## Requirements
 
@@ -35,8 +38,7 @@ php artisan background-removal:install
 ### Platform Auto-Detection
 
 The install command automatically detects your platform:
-- **Alpine Linux** → `bg-remover-alpine-x86_64` (for Laravel Vapor)
-- **Ubuntu/Debian** → `bg-remover-ubuntu-x86_64` (for Laravel Forge)
+- **Ubuntu/Debian** → `bg-remover-ubuntu-x86_64` (for Laravel Forge, Vapor, etc.)
 - **macOS** → `bg-remover-macos-arm64` (for Apple Silicon development)
 
 ### Manual Platform Selection
@@ -44,7 +46,6 @@ The install command automatically detects your platform:
 If auto-detection fails or you need a specific platform:
 
 ```bash
-php artisan background-removal:install --platform=alpine
 php artisan background-removal:install --platform=ubuntu
 php artisan background-removal:install --platform=macos-arm64
 ```
@@ -52,6 +53,98 @@ php artisan background-removal:install --platform=macos-arm64
 ### Custom Platform Support
 
 The package only maintains binaries for platforms we actively use. For other platforms (Windows, Raspberry Pi, Arch, etc.), see the [FORKING.md](https://github.com/artisan-build/bg-remover/blob/main/FORKING.md) guide to build your own binary.
+
+## Quick Install Binary (Standalone)
+
+If you're not using Laravel or want to quickly install the binary:
+
+```bash
+# Run the installation script
+./install-binary.sh
+```
+
+This will auto-detect your platform and download the appropriate binary to `bin/bg-remover`.
+
+## Building from Source
+
+This package now includes the complete C++ source code. You can build the binary yourself:
+
+### Quick Build (macOS)
+
+```bash
+# Install OpenCV and ONNX Runtime
+brew install opencv onnxruntime
+
+# Build with ML support
+cd cpp-src
+make ML=1
+
+# Or build without ML support
+make
+
+# Install
+mkdir -p ../bin
+cp bg-remover ../bin/
+```
+
+### Quick Build (Ubuntu/Debian)
+
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y g++ make pkg-config libopencv-dev
+
+# Optional: Install ONNX Runtime for ML support
+# Follow: https://github.com/microsoft/onnxruntime/releases
+
+# Build with ML support (if ONNX Runtime installed)
+cd cpp-src
+make ML=1
+
+# Or build without ML support
+make
+
+# Install
+mkdir -p ../bin
+cp bg-remover ../bin/
+```
+
+### Docker Builds (Cross-platform)
+
+```bash
+cd cpp-src
+
+# Build for Ubuntu (includes ML support)
+make ubuntu
+
+# Install
+mkdir -p ../bin
+cp bg-remover-ubuntu-x86_64 ../bin/bg-remover
+chmod +x ../bin/bg-remover
+```
+
+For detailed build instructions, see [cpp-src/README.md](cpp-src/README.md).
+
+## Demo UI
+
+Try out the background remover with a simple web interface:
+
+1. Install the binary (see above)
+2. Start the demo:
+   ```bash
+   cd demo
+   php -S localhost:8000
+   ```
+3. Open http://localhost:8000 in your browser
+4. Upload an image and see the result
+
+The demo features:
+- Drag-and-drop image upload
+- Side-by-side comparison
+- Download processed images
+- Support for JPG and PNG
+
+For more details, see [demo/README.md](demo/README.md).
 
 ## Usage
 
@@ -171,7 +264,7 @@ The binary is automatically downloaded during build. No additional configuration
 php artisan background-removal:install
 ```
 
-The install command detects the Alpine environment and downloads the correct binary.
+The Ubuntu binary works on AWS Lambda environments (including Vapor) and includes full ML support.
 
 ## Laravel Forge Deployment
 
@@ -248,28 +341,68 @@ composer test:coverage
 
 ## Platform Notes
 
-### Alpine Linux (Laravel Vapor)
-- Uses statically-linked OpenCV
-- Optimized for AWS Lambda
-- ~23KB binary size
-
-### Ubuntu (Laravel Forge)
+### Ubuntu (Laravel Forge, Vapor, etc.)
 - Uses system OpenCV libraries
+- Includes ONNX Runtime for ML support
 - Standard glibc-based binary
 - ~23KB binary size
 
 ### macOS ARM64 (Development)
 - Native Apple Silicon binary
-- Uses Homebrew OpenCV
+- Uses Homebrew OpenCV and ONNX Runtime
+- Full ML support included
 - Universal x86_64 support coming soon
+
+## ML Mode
+
+All binaries are compiled with ML support via ONNX Runtime. To use ML-based segmentation:
+
+```bash
+# Download an ONNX model (e.g., U2-Net, RMBG-1.4)
+# Then use with --ml flag
+bg-remover -i input.jpg -o output.png --ml --model path/to/model.onnx
+```
+
+ML mode provides superior edge detection and works better with complex backgrounds compared to the traditional GrabCut algorithm.
+
+## Project Structure
+
+```
+background-remover/
+├── src/                      # Laravel package source
+│   ├── Commands/             # Artisan commands
+│   ├── Jobs/                 # Queue jobs
+│   ├── Providers/            # Service providers
+│   └── Services/             # Background removal service
+├── cpp-src/                  # C++ source code
+│   ├── bg-remover.cpp        # Main C++ implementation
+│   ├── Makefile              # Build system with ML support
+│   ├── Dockerfile.ubuntu     # Ubuntu build with ONNX Runtime
+│   └── README.md             # Build documentation
+├── demo/                     # Interactive demo UI
+│   ├── index.html            # Web interface
+│   ├── process.php           # Processing endpoint
+│   └── README.md             # Demo documentation
+├── config/                   # Laravel config
+├── tests/                    # Package tests
+├── bin/                      # Binary installation directory
+├── install-binary.sh         # Binary installation script
+└── README.md                 # This file
+```
 
 ## Troubleshooting
 
 ### Binary Not Found
 
 ```bash
-# Reinstall the binary
+# For Laravel projects
 php artisan background-removal:install
+
+# For standalone usage
+./install-binary.sh
+
+# Or build from source
+cd cpp-src && make && mkdir -p ../bin && cp bg-remover ../bin/
 ```
 
 ### Permission Denied
@@ -281,7 +414,13 @@ chmod +x bin/bg-remover
 
 ### Platform Not Supported
 
-See [FORKING.md](https://github.com/artisan-build/bg-remover/blob/main/FORKING.md) for building custom platform binaries.
+Build from source using the included C++ code:
+```bash
+cd cpp-src
+# Follow instructions in cpp-src/README.md
+```
+
+Or see [FORKING.md](https://github.com/artisan-build/bg-remover/blob/main/FORKING.md) for building custom platform binaries.
 
 ## Credits
 

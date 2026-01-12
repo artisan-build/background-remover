@@ -1,0 +1,238 @@
+name: Build Multi-Platform Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0) - required for release creation'
+        required: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - platform: ubuntu
+            runner: ubuntu-latest
+            dockerfile: cpp-src/Dockerfile.ubuntu
+            output: bg-remover-ubuntu-x86_64
+
+          - platform: macos
+            runner: macos-latest
+            output: bg-remover-macos-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Linux builds (Ubuntu) via Docker
+      - name: Set up Docker Buildx
+        if: matrix.platform == 'ubuntu'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.platform }} binary (Docker)
+        if: matrix.platform == 'ubuntu'
+        run: |
+          docker build -f ${{ matrix.dockerfile }} -t bg-remover-${{ matrix.platform }} .
+          docker create --name extract bg-remover-${{ matrix.platform }}
+          docker cp extract:/app/bg-remover ./${{ matrix.output }}
+          docker rm extract
+
+      # macOS build (native)
+      - name: Install OpenCV and ONNX Runtime (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          brew install opencv pkg-config onnxruntime
+
+      - name: Build macOS ARM64 binary with ML support
+        if: matrix.platform == 'macos'
+        working-directory: cpp-src
+        run: |
+          make clean
+          make ML=1
+          mv bg-remover ../${{ matrix.output }}
+
+      # Test binary works
+      - name: Test binary
+        run: |
+          chmod +x ${{ matrix.output }}
+          ./${{ matrix.output }} --help > help.txt
+          cat help.txt
+          # Verify help output contains expected text
+          grep -q "Background Remover CLI" help.txt || exit 1
+          grep -q "Usage:" help.txt || exit 1
+          echo "✅ Binary test passed"
+
+      # Verify binary
+      - name: Verify binary
+        run: |
+          echo "=== Binary Information ==="
+          ls -lh ${{ matrix.output }}
+          file ${{ matrix.output }}
+
+      # Generate checksum
+      - name: Generate SHA256 checksum
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sha256sum ${{ matrix.output }} > ${{ matrix.output }}.sha256
+          else
+            shasum -a 256 ${{ matrix.output }} > ${{ matrix.output }}.sha256
+          fi
+          cat ${{ matrix.output }}.sha256
+
+      # Upload artifacts
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: |
+            ${{ matrix.output }}
+            ${{ matrix.output }}.sha256
+          retention-days: 90
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Set version variable
+      - name: Set version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            # Ensure version starts with 'v'
+            if [[ ! "$VERSION" =~ ^v ]]; then
+              VERSION="v${VERSION}"
+            fi
+            echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      # Download all artifacts
+      - name: Download Ubuntu binary
+        uses: actions/download-artifact@v4
+        with:
+          name: bg-remover-ubuntu-x86_64
+          path: ./dist
+
+      - name: Download macOS binary
+        uses: actions/download-artifact@v4
+        with:
+          name: bg-remover-macos-arm64
+          path: ./dist
+
+      # Reorganize artifacts (flatten structure)
+      - name: Organize artifacts
+        run: |
+          # Move binaries from their artifact directories to dist root
+          find ./dist -type f \( -name "bg-remover-*" -o -name "*.sha256" \) -exec mv {} ./dist/ \;
+          # Remove empty artifact directories
+          find ./dist -type d -empty -delete
+
+          echo "=== Artifacts Ready ==="
+          ls -lh ./dist/
+
+      # Create combined checksums file
+      - name: Create checksums.txt
+        run: |
+          cd dist
+          cat *.sha256 > checksums.txt
+          echo "=== Checksums ==="
+          cat checksums.txt
+
+      # Create GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: |
+            dist/bg-remover-ubuntu-x86_64
+            dist/bg-remover-macos-arm64
+            dist/checksums.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## BG Remover ${{ steps.version.outputs.tag }}
+
+            Multi-platform background removal binaries using OpenCV GrabCut algorithm.
+
+            ### Downloads
+
+            | Platform | Binary | Use Case |
+            |----------|--------|----------|
+            | Ubuntu (x86_64) | `bg-remover-ubuntu-x86_64` | Laravel Forge, standard Linux servers, Docker |
+            | macOS (ARM64) | `bg-remover-macos-arm64` | Apple Silicon development |
+
+            ### Quick Install
+
+            **Ubuntu/Debian:**
+            ```bash
+            curl -L -o bg-remover https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/bg-remover-ubuntu-x86_64
+            chmod +x bg-remover
+            ./bg-remover -i input.jpg -o output.png
+            ```
+
+            **macOS (Apple Silicon):**
+            ```bash
+            curl -L -o bg-remover https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/bg-remover-macos-arm64
+            chmod +x bg-remover
+            ./bg-remover -i input.jpg -o output.png
+            ```
+
+            ### Verify Download (Recommended)
+
+            ```bash
+            # Download checksums
+            curl -L -O https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/checksums.txt
+
+            # Verify (Linux)
+            sha256sum -c checksums.txt
+
+            # Verify (macOS)
+            shasum -a 256 -c checksums.txt
+            ```
+
+            ### Usage
+
+            **Basic (GrabCut algorithm):**
+            ```bash
+            bg-remover -i input.jpg -o output.png
+            bg-remover -i input.jpg -o output.png -q quality
+            bg-remover --help
+            ```
+
+            **ML Mode (requires ONNX model):**
+            ```bash
+            bg-remover -i input.jpg -o output.png --ml --model u2net.onnx
+            bg-remover -i input.jpg -o output.png --ml --model rmbg-1.4.onnx
+            ```
+
+            **Note:** Binaries are compiled with ML support via ONNX Runtime. Models must be downloaded separately.
+
+            ### Documentation
+
+            - [README](https://github.com/${{ github.repository }}#readme) - Quick start and usage
+            - [Build Instructions](https://github.com/${{ github.repository }}/blob/main/cpp-src/README.md) - Build from source
+            - [Demo](https://github.com/${{ github.repository }}/blob/main/demo/README.md) - Try the web interface
+
+            ### What's Changed
+
+            See generated release notes below for detailed changes.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

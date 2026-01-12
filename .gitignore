@@ -1,0 +1,33 @@
+# Binaries
+bin/
+cpp-src/bg-remover
+cpp-src/bg-remover-*
+
+# Demo temporary files
+demo/uploads/
+demo/outputs/
+
+# ML Models (too large for git - download separately)
+models/
+
+# IDE
+.idea/
+
+# Composer
+vendor/
+composer.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.phpunit.cache/
+coverage/
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
